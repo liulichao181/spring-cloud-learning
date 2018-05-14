@@ -1,0 +1,23 @@
+private int start = 0;
+	private int end = 2147483647;
+
+	public void setPage(Map<String, Object> params) {
+		this.setStart(Integer.parseInt(params.get("offset").toString()));
+		this.setEnd(Integer.parseInt(params.get("limit").toString()) + this.start + 1);
+	}
+
+	public int getStart() {
+		return start;
+	}
+
+	public void setStart(int start) {
+		this.start = start;
+	}
+
+	public int getEnd() {
+		return end;
+	}
+
+	public void setEnd(int end) {
+		this.end = end;
+	}
