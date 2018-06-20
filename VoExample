@@ -1,23 +1,230 @@
-private int start = 0;
-	private int end = 2147483647;
+package com.bootdo.system.shiro;
 
-	public void setPage(Map<String, Object> params) {
-		this.setStart(Integer.parseInt(params.get("offset").toString()));
-		this.setEnd(Integer.parseInt(params.get("limit").toString()) + this.start + 1);
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import org.apache.shiro.authc.AuthenticationException;
+import org.apache.shiro.authc.AuthenticationInfo;
+import org.apache.shiro.authc.AuthenticationToken;
+import org.apache.shiro.authc.IncorrectCredentialsException;
+import org.apache.shiro.authc.LockedAccountException;
+import org.apache.shiro.authc.SimpleAuthenticationInfo;
+import org.apache.shiro.authc.UnknownAccountException;
+import org.apache.shiro.authz.AuthorizationInfo;
+import org.apache.shiro.authz.SimpleAuthorizationInfo;
+import org.apache.shiro.realm.AuthorizingRealm;
+import org.apache.shiro.subject.PrincipalCollection;
+import org.springframework.beans.factory.annotation.Autowired;
+
+import com.bootdo.common.config.BootdoConfig;
+import com.bootdo.common.utils.CommentUtils;
+import com.bootdo.common.utils.DateUtils;
+import com.bootdo.common.utils.LdapAuthenticate;
+import com.bootdo.common.utils.MD5Utils;
+import com.bootdo.common.utils.ShiroUtils;
+import com.bootdo.common.utils.StringUtils;
+import com.bootdo.system.dao.UserDao;
+import com.bootdo.system.domain.UserDO;
+import com.bootdo.system.service.MenuService;
+import com.bootdo.system.service.SessionService;
+import com.pingan.um.client.service.UMUser;
+import com.pingan.um.domain.MyUmUserInfo;
+import com.pingan.um.domain.OrgInfo;
+import com.pingan.um.util.ServiceUtil;
+import com.pingan.um.util.UmServiceHelper;
+import com.pingan.umcs.UmcsAuthenticate;
+import com.pingan.umcs.domain.LoginReturnUserInfo;
+
+public class UserRealm extends AuthorizingRealm {
+	@Autowired
+	UserDao userMapper;
+	@Autowired
+	MenuService menuService;
+	@Autowired
+	SessionService sessionService;
+	@Autowired
+	private BootdoConfig bootdoConfig;
+	private static final String LOGIN_CHECK_TYPE0 = "0";	//通过本地DB登录校验
+	private static final String LOGIN_CHECK_TYPE1 = "1";	//通过UM登录
+	private static final String LOGIN_CHECK_TYPE2 = "2";	//通过域账户登录
+	private static final String LOGIN_CHECK_TYPE3 = "3";	//通过UMCS登录
+
+	@Override
+	protected AuthorizationInfo doGetAuthorizationInfo(PrincipalCollection arg0) {
+		Long userId = ShiroUtils.getUserId();
+		Set<String> perms = menuService.listPerms(userId);
+		SimpleAuthorizationInfo info = new SimpleAuthorizationInfo();
+		info.setStringPermissions(perms);
+		return info;
 	}
 
-	public int getStart() {
-		return start;
+	
+	
+	@Override
+	protected AuthenticationInfo doGetAuthenticationInfo(AuthenticationToken token) throws AuthenticationException {
+		String username = (String) token.getPrincipal();
+		String password = new String((char[]) token.getCredentials());
+		String flag = bootdoConfig.getLoginType();
+		
+		if ("admin".equalsIgnoreCase(username)) {
+			checkUserWithDB(username, password);
+		} else {
+			if (LOGIN_CHECK_TYPE0.equals(flag)) {
+				checkUserWithDB(username, password);
+			}
+			if (LOGIN_CHECK_TYPE1.equals(flag)) {
+				checkUserWithUM(username, password);
+			}
+			if (LOGIN_CHECK_TYPE2.equals(flag)) {
+				checkUserWithLdap(username, password);
+			}
+			if (LOGIN_CHECK_TYPE3.equals(flag)) {
+				checkUserWithUMCS(username, password);
+			}
+
+		}
+		
+		//判断当前用户是否已经在别的设备上登录了，如果是，需要剔除！
+		checkOutLogining(username);
+		
+		Map<String, Object> map = new HashMap<>(16);
+		map.put("username", username);
+
+		// 查询用户信息
+		List<UserDO> userList = userMapper.list(map);
+		UserDO userDO = null;
+		if(CommentUtils.isCollectionEmpty(userList)){
+			//本平台没有该用户，说明该用户是首次登录本平台，需要从UM系统或者LDAP中获取用户信息，落地到本平台的数据库
+			if( LOGIN_CHECK_TYPE1.equals(flag)){
+				userDO = insetUmUser(username, userMapper, password);
+			}
+			if( LOGIN_CHECK_TYPE2.equals(flag)){
+				userDO = insetLdapUser(username, userMapper, password);
+			}
+			if( LOGIN_CHECK_TYPE3.equals(flag)){
+				userDO = insetUmcsUser(username, userMapper, password);
+			}
+			
+		}else{
+			userDO = userList.get(0);
+		}
+		SimpleAuthenticationInfo info = new SimpleAuthenticationInfo(userDO, password, getName());
+		return info;
+	}
+	
+	
+	// 调用UM系统，判断用户密码是否正确
+	private void checkUserWithUM(String username, String password){
+		if(!UmServiceHelper.authenticate(username, password)){
+			throw new IncorrectCredentialsException("账号或密码不正确！");
+		}
+	}
+	
+	
+	// 调用LDAP域，，判断用户密码是否正确
+	private void checkUserWithLdap(String username, String password){
+		boolean result = LdapAuthenticate.ldapCheck(username, password);
+		if(!result){
+			throw new IncorrectCredentialsException("账号或密码不正确！");
+		}
+	}
+	
+	
+	// 通过UMCS，校验账密是否正确
+	private void checkUserWithUMCS(String username, String password){
+		String result = UmcsAuthenticate.umcsCheck(username, password);
+		if(!StringUtils.isEmpty(result)){
+			throw new IncorrectCredentialsException(result);
+		}
+	}
+	
+	
+	// 直接查询本地数据库，，判断用户密码是否正确
+	private void checkUserWithDB(String username, String password){
+		String passwordDecord = MD5Utils.encrypt(username, password);
+		Map<String, Object> map = new HashMap<>(16);
+		map.put("username", username);
+		// 查询用户信息
+		List<UserDO> list = userMapper.list(map);
+		if(CommentUtils.isCollectionEmpty(list)){
+			throw new UnknownAccountException("账号或密码不正确");
+		}
+		UserDO user = list.get(0);
+		// 账号不存在
+		if (user == null) {
+			throw new UnknownAccountException("账号或密码不正确");
+		}
+		// 密码错误
+		if (!passwordDecord.equals(user.getPassword())) {
+			throw new IncorrectCredentialsException("账号或密码不正确");
+		}
+		// 账号锁定
+		if (user.getStatus() == 0) {
+			throw new LockedAccountException("账号已被锁定,请联系管理员");
+		}
 	}
 
-	public void setStart(int start) {
-		this.start = start;
+	
+	
+	//保存从UM系统拿到的用户信息到SYS_USER表
+	private UserDO insetUmUser(String username, UserDao userMapper, String password){
+		UMUser umUser = UmServiceHelper.getUser(username);
+		MyUmUserInfo umUserInfo = null;
+		UserDO userDO = new UserDO();
+		if(null != umUser){
+			umUserInfo = ServiceUtil.transUMUserToUMUserInfo(umUser);
+		}
+		if(null != umUserInfo){
+			userDO.setUsername(username);
+			userDO.setName(umUserInfo.getUserName());
+			if("true".equals(umUserInfo.getIsActive())){
+				userDO.setStatus(1);
+			}else{
+				userDO.setStatus(0);
+			}
+			userDO.setDeptCode(umUserInfo.getDeptRef());
+			OrgInfo org= UmServiceHelper.getOrgByUser(umUser);
+			if(null != org){
+				userDO.setDeptName(org.getName());
+			}
+			userDO.setEmail(umUserInfo.getEmail());
+			userDO.setGmtCreate(DateUtils.parseDate(umUserInfo.getActiveDate(), DateUtils.DATE_TIME_PATTERN));
+			userDO.setPassword(MD5Utils.encrypt(username, password));
+			userMapper.save(userDO);
+		}
+		return userDO;
 	}
-
-	public int getEnd() {
-		return end;
+	
+	
+	//保存从LDAP域账户拿到的用户信息到SYS_USER表
+	private UserDO insetLdapUser(String username, UserDao userMapper, String password){
+		UserDO userDO = new UserDO();
+		userDO.setUsername(username);
+		userDO.setGmtCreate(new Date());
+		userDO.setPassword(MD5Utils.encrypt(username, password));
+		userDO.setStatus(1);
+		userMapper.save(userDO);
+		return userDO;
 	}
-
-	public void setEnd(int end) {
-		this.end = end;
+	
+	//保存从UMCS系统拿到的用户信息到SYS_USER表
+	private UserDO insetUmcsUser(String username, UserDao userMapper, String password){
+		LoginReturnUserInfo user = UmcsAuthenticate.getUserByUserid(username);
+		UserDO userDO = new UserDO();
+		if(null != user){
+			userDO.setUsername(username);
+			userDO.setName(user.getUserName());
+			userDO.setPassword(MD5Utils.encrypt(username, password));
+			userMapper.save(userDO);
+		}
+		return userDO;
 	}
+	
+	//判断当前用户是否已经在别的设备上登录了,如果是，需要剔除。（一个用户不能同时在多个设备登录）
+	private void checkOutLogining(String userName) throws AuthenticationException{
+		sessionService.removeSessionsByUserName(userName);
+	}
+}
