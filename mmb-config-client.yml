@@ -1,1 +1,90 @@
-lucky-word: mmb
+@charset "UTF-8";
+.pabank-markdown h1,h2,h3,h4,h5,h6{
+    color:#3e2c42;
+}
+.pabank-markdown h1{
+    font-size:23px;
+    border-bottom: 0px solid #e4ad47;
+}
+.pabank-markdown h2{
+    font-size:21px;
+    border-bottom: 0px solid #e4ad47;
+}
+.pabank-markdown h3{
+    font-size:19px;
+}
+.pabank-markdown h4{
+    font-size:17px;
+}
+.pabank-markdown h5{
+    font-size:15px;
+}
+.pabank-markdown h6{
+    color:#3e2c42;
+    font-size:14px;
+}
+
+.pabank-markdown del{
+    background-color:white;
+}
+.pabank-markdown div{
+    background-color:red
+}
+.pabank-markdown p{
+    line-height:2;
+}
+.pabank-markdown p code{
+    border: 1px solid orange;
+    padding-bottom:0px;
+    padding-top:0px;
+    background-color:#fbf5f5;
+    color:#112f46;
+}
+.pabank-markdown ul{
+    list-style-type: square;
+    color:#918294;
+}
+.pabank-markdown ol{
+    color:#918294;
+}
+.pabank-markdown pre {
+    border:none;
+    background-color:#fdfcfc;
+}
+.pabank-markdown pre .kwd {
+    font-weight：bolder ;
+    color:red;
+}
+.pabank-markdown pre .typ {
+    font-weight：bolder ;
+    color:#079a7c;
+}
+.pabank-markdown pre code {
+    border:none;
+    background-color: transparent;
+}
+
+.pabank-markdown pre li:nth-child(odd) {
+    background:#ffffff;
+}
+.pabank-markdown pre li:nth-child(even) {
+    background: none;
+}
+.pabank-markdown table {
+    border-color: orange;
+}
+.pabank-markdown table th{
+    border-color: orange;
+    background-color:#eee;
+}
+.pabank-markdown table td{
+    border-color: orange;
+    background-color:white;
+}
+.pabank-markdown blockquote{
+    border-left: 4px solid orange;
+}
+.pabank-markdown hr{
+    border-top:1px solid orange;
+}
+
